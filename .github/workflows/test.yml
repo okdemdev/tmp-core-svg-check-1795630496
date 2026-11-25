@@ -29,42 +29,31 @@ jobs:
           xcodebuild -version
           xcrun simctl list runtimes
 
+      - name: Build SVG variants
+        run: |
+          python3 sanitize.py fillopacity item-angel-sticker.svg fixed-fillopacity.svg
+          python3 sanitize.py baked item-angel-sticker.svg fixed-baked.svg
+          cat > control.svg <<'SVG'
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <path d="M10 10h80v80H10z" fill="#FF0000" opacity="0.5"/>
+          </svg>
+          SVG
+
       - name: Create and boot simulator
         id: sim
-        run: |
-          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-want='${{ matrix.ios }}'
-matches=[r for r in d['runtimes'] if r.get('version','').startswith(want)]
-if not matches:
-    raise SystemExit('no runtime '+want)
-print(matches[0]['identifier'])
-")
-          echo "runtime=$RUNTIME"
-          DEVICE=$(xcrun simctl create "CoreSVGTest" "com.apple.CoreSimulator.SimDeviceType.iPhone-15" "$RUNTIME")
-          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
-          xcrun simctl boot "$DEVICE"
-          xcrun simctl bootstatus "$DEVICE" -b
+        run: python3 ci.py create "${{ matrix.ios }}"
 
       - name: Compile harness
         run: |
           ARCH=$(uname -m)
           xcrun --sdk iphonesimulator swiftc \
             -target "${ARCH}-apple-ios${{ matrix.ios }}-simulator" \
-            svgtest2.swift -o svgtest2 -framework UIKit
+            svgtest3.swift -o svgtest3 -framework UIKit
 
       - name: Run tests
         run: |
-          sed 's/ opacity="/ fill-opacity="/g' item-angel-sticker.svg > fixed.svg
-          cat > control.svg <<'EOF'
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-            <path d="M10 10h80v80H10z" fill="#FF0000" opacity="0.5"/>
-          </svg>
-          EOF
-          set +e
-          for f in item-angel-sticker.svg fixed.svg control.svg; do
-            echo "===== $f ====="
-            xcrun simctl spawn "${{ steps.sim.outputs.device }}" "$PWD/svgtest2" "$PWD/$f"
-            echo "EXIT_$f=$?"
-          done
+          python3 ci.py run "${{ steps.sim.outputs.device }}" \
+            item-angel-sticker.svg \
+            fixed-fillopacity.svg \
+            fixed-baked.svg \
+            control.svg
