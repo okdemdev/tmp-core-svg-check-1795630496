@@ -1,0 +1,56 @@
+name: CoreSVG iOS 17 test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test17:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+
+      - name: Environment
+        run: |
+          uname -m
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Ensure iOS 17.5 runtime
+        run: |
+          if ! xcrun simctl list runtimes | grep -q "iOS 17.5"; then
+            xcodebuild -downloadPlatform iOS -buildVersion 17.5
+          fi
+          xcrun simctl list runtimes
+
+      - name: Build SVG variants
+        run: |
+          python3 sanitize.py fillopacity item-angel-sticker.svg fixed-fillopacity.svg
+          python3 sanitize.py baked item-angel-sticker.svg fixed-baked.svg
+          cat > control.svg <<'SVG'
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+            <path d="M10 10h80v80H10z" fill="#FF0000" opacity="0.5"/>
+          </svg>
+          SVG
+
+      - name: Create and boot simulator
+        id: sim
+        run: python3 ci.py create "17.5"
+
+      - name: Compile harness
+        run: |
+          ARCH=$(uname -m)
+          xcrun --sdk iphonesimulator swiftc \
+            -target "${ARCH}-apple-ios17.5-simulator" \
+            svgtest3.swift -o svgtest3 -framework UIKit
+
+      - name: Run tests
+        run: |
+          python3 ci.py run "${{ steps.sim.outputs.device }}" \
+            item-angel-sticker.svg \
+            fixed-fillopacity.svg \
+            fixed-baked.svg \
+            control.svg
